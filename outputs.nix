@@ -4,9 +4,13 @@ inputs: let
   genFlake = inputs.import-tree
     (self: self.map (p: let
       t = builtins.tail paths;
+      # equivalent with lib.splitString "/"
       paths = builtins.filter builtins.isString (builtins.split "/" (builtins.substring i (-1) p));
       filename = builtins.elemAt paths (builtins.length paths - 1);
-      name = if t == [ ] then builtins.substring 0 (builtins.stringLength filename - 4) filename else builtins.head paths;
+      name =
+        if t == [ ] then # if <file>.nix, then name = <file>
+          builtins.substring 0 (builtins.stringLength filename - 4) filename
+        else builtins.head paths; # otherwise name = dirname
     in {
       inherit name;
       path = p;
