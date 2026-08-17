@@ -19,9 +19,28 @@ inputs: let
     (s: s.pipeTo (modules: let
       flakeModules = fixModules modules;
       allModules = builtins.attrValues flakeModules;
+      mkModuleFor = name: {
+        __functor = _: _: {
+          key = "garden:fmway:${name}";
+          imports = map (x: x.${name} or x) allModules;
+        };
+        without = excludes: let
+          fModules = removeAttrs flakeModules excludes;
+        in {
+          key = "garden:fmway:{${builtins.concatStringsSep "," (builtins.attrNames fModules)}}:${name}";
+          imports = map (x: x.${name} or x) (builtins.attrValues fModules);
+        };
+      };
       flakeModule = {
-        __functor = _: _: { imports = builtins.concatMap (x: ((x.__functor or (_: _: x)) null null).imports) allModules; };
-        with-deps.imports = builtins.concatMap (x: (x.with-deps or x).imports) allModules;
+        __functor = self: _: self.base;
+        full = mkModuleFor "full" // {
+          no-deps-for = list: {
+            key = "garden:fmway:full";
+            imports = map (name: let m = flakeModules.${name}; in if builtins.elem name list then m.base or m else m.full or m) (builtins.attrNames flakeModules);
+          };
+        };
+        base = mkModuleFor "base";
+        without = flakeModule.base.without;
       };
     in { inherit flakeModule; flakeModules = flakeModules // { default = flakeModule; }; }))
   scanDir;
@@ -33,9 +52,16 @@ inputs: let
     depModules = map (x: x.path) parts.right;
     baseModules = map (x: x.path) parts.wrong;
     depification = {
-      __functor = _: _: { imports = baseModules; };
-      with-deps.imports = baseModules ++ depModules;
+      __functor = self: _: self.base;
+      full = {
+        key = "garden:fmway:${name}:full";
+        imports = depModules ++ [ depification.base ];
+      };
+      base = {
+        key = "garden:fmway:${name}:base";
+        imports = baseModules;
+      };
     };
-  in if depModules == [] then { imports = baseModules; } else depification) grouped;
+  in if depModules == [] then depification.base else depification) grouped;
   
 in genFlake
