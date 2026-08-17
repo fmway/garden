@@ -1,29 +1,25 @@
 inputs: let
-  lib = inputs.flake-parts.inputs.nixpkgs-lib.lib;
   scanDir = builtins.toPath ./modules;
-  genModules = inputs.import-tree
-    (self: self.map (p': let
-      p = builtins.toPath p';
-      h = builtins.head paths;
+  i = builtins.stringLength scanDir + 1;
+  genFlake = inputs.import-tree
+    (self: self.map (p: let
       t = builtins.tail paths;
-      paths = lib.splitString "/" (lib.removePrefix "${scanDir}/" p');
-      filename = lib.last t;
-      name = if builtins.length t == 1 then lib.removeSuffix ".nix" filename else builtins.head t;
-      r = {
-        inherit name;
-        path = p';
-        is_dep = filename == "deps.nix";
-      };
-    in if h == "batteries" then r else p))
+      paths = builtins.filter builtins.isString (builtins.split "/" (builtins.substring i (-1) p));
+      filename = builtins.elemAt paths (builtins.length paths - 1);
+      name = if t == [ ] then builtins.substring 0 (builtins.stringLength filename - 4) filename else builtins.head paths;
+    in {
+      inherit name;
+      path = p;
+      is_dep = filename == "deps.nix";
+    }))
     (s: s.pipeTo (modules: let
-      parts = builtins.partition builtins.isAttrs modules;
-      flakeModules = fixModules parts.right;
+      flakeModules = fixModules modules;
       allModules = builtins.attrValues flakeModules;
       flakeModule = {
         __functor = _: _: { imports = builtins.concatMap (x: ((x.__functor or (_: _: x)) null null).imports) allModules; };
         with-deps.imports = builtins.concatMap (x: (x.with-deps or x).imports) allModules;
       };
-    in { imports = parts.wrong; flake = { inherit flakeModule; flakeModules = flakeModules // { default = flakeModule; }; }; }))
+    in { inherit flakeModule; flakeModules = flakeModules // { default = flakeModule; }; }))
   scanDir;
 
   fixModules = list: let
@@ -38,6 +34,4 @@ inputs: let
     };
   in if depModules == [] then { imports = baseModules; } else depification) grouped;
   
-in inputs.flake-parts.lib.mkFlake { inherit inputs; } {
-  imports = [ genModules ];
-}
+in genFlake
