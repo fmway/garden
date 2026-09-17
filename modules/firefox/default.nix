@@ -2,107 +2,53 @@
   # Assisted by kiro-ai
 
   inherit (import "${inputs.den}/nix/lib/entities/_types.nix" { inherit lib den; }) resolvedCtxModule;
+  inherit (den.lib.aspects.fx.handlers) constantHandler;
   allHosts = lib.concatMap builtins.attrValues (builtins.attrValues den.hosts);
   allHomes = lib.concatMap builtins.attrValues (builtins.attrValues den.homes);
   allUsers = lib.concatMap (h: builtins.attrValues h.users) allHosts;
-  allFirefoxProfiles = lib.concatMap (p: builtins.attrValues p.firefox-profiles) (allUsers ++ allHomes);
-
-  deps = map (from: {
-    ${from.name} = lib.genAttrs from.classes (_: { });
-  }) allFirefoxProfiles;
+  allFirefoxProfiles = lib.concatMap (p: builtins.attrNames p.firefox-profiles) (allUsers ++ allHomes);
 
   builtinBrowserClasses = [ "firefox" "floorp" "librewolf" ];
+  externalBrowserClasses = {
+    zen-browser.getModule = { user, ... }: let
+      variant = user.zen-browser.variant or "beta";
+    in inputs.zen-browser.homeModules.${variant} or (
+      throw "den: zen-browser variant '${variant}' not found in inputs.zen-browser.homeModules"
+    );
+  };
 
-  externalBrowserClasses = [
-    { class = "zen";
-      getModule =
-        { user, ... }: let
-          variant = user.zen.variant or "beta";
-        in inputs.zen-browser.homeModules.${variant} or (
-          throw "den: zen-browser variant '${variant}' not found in inputs.zen-browser.homeModules"
-        );
-      optionPath = "zen-browser";
-    }
-  ];
+  allBrowserClasses = builtinBrowserClasses ++ builtins.attrNames externalBrowserClasses;
 
-  allBrowserClasses = builtinBrowserClasses ++ map (e: e.class) externalBrowserClasses;
-
-  # For builtins it's 1:1; external classes may differ (e.g. zen → zen-browser).
-  browserOptionPath =
-    browserClass: let
-      external = lib.findFirst (e: e.class == browserClass) null externalBrowserClasses;
-    in if external != null then external.optionPath else browserClass;
-
-  resolveBrowserClass =
-    { profile, browserClass, profileAspectWithCtx }: let
-      resolved = den.lib.aspects.resolve browserClass profileAspectWithCtx;
-      # The pipeline wraps each class module as { _file; key; imports = [fn] }.
-      # Extract the inner module functions so they can be used as profile values.
+  resolveBrowser =
+    aspect: class: let
+      resolved = den.lib.aspects.resolve class aspect;
       innerModules = lib.concatMap (m: m.imports or [ ]) resolved.imports;
     in lib.mkMerge innerModules;
 
   mkBrowserProfileInclude =
-    { profile, browserClass }:
+    { source, class, host, user, ... }:
     den.lib.policy.include {
-      name = "firefox-profile/${profile.profileName}/${browserClass}";
+      name = "firefox-profile/${source.profileName}/${class}";
       homeManager =
         { pkgs, lib, config, osConfig, ... }: let
-          profileAspectWithCtx = let
-            raw = profile.resolved;
-            inherit (den.lib.aspects.fx.handlers) constantHandler;
-          in if builtins.isAttrs raw then
-            raw // {
-              __scopeHandlers = (raw.__scopeHandlers or { }) // constantHandler { inherit profile pkgs osConfig; homeConfig = config; };
-            }
-          else raw;
-
-          resolveClass = cls: resolveBrowserClass { inherit profile profileAspectWithCtx; browserClass = cls; };
-
-          aliasedClasses = profile.classAliases.${browserClass} or [ ];
-          browserValue = lib.mkMerge (map resolveClass (aliasedClasses ++ [ browserClass ]));
-
-          optPath = browserOptionPath browserClass;
+          aspect = source.resolved // {
+            __scopeHandlers = (source.resolved.__scopeHandlers or { }) // constantHandler { inherit pkgs osConfig; homeConfig = config; };
+          };
+          additionalModule = externalBrowserClasses.${class}.getModule { inherit source host user; };
         in {
-          programs.${optPath} = {
+          imports = lib.optional (externalBrowserClasses ? ${class}.getModule) additionalModule;
+          programs.${class} = {
             enable = lib.mkDefault true;
-            profiles.${profile.profileName} = browserValue;
+            profiles.${source.profileName} = lib.mkMerge (map (resolveBrowser aspect) (source.classAliases.${class} or [ ] ++ [ class ]));
           };
         };
-    };
-
-  mkExternalBrowserHostModule =
-    { profile, externalEntry, host, user }: let
-      hostModule = externalEntry.getModule { inherit profile host user; };
-    in den.lib.policy.include {
-      name = "firefox-profile/${profile.profileName}/${externalEntry.class}-host-module";
-      homeManager.imports = [
-        {
-          key = "den:firefox-profile-${externalEntry.class}-${profile.profileName}";
-          imports = [ hostModule ];
-        }
-      ];
     };
 
   toFirefoxProfiles =
     home-or-user:
     { user, host, ... }: let
       profiles = lib.attrValues (home-or-user.firefox-profiles or { });
-    in lib.concatMap (
-      profile: let
-        enabledClasses = profile.classes;
-        # Include for each enabled browser class
-        browserIncludes = map (
-          browserClass: mkBrowserProfileInclude { inherit profile browserClass; }
-        ) enabledClasses;
-        # Extra host module includes for external browser classes
-        externalIncludes = lib.concatMap (
-          externalEntry:
-          lib.optional (lib.elem externalEntry.class enabledClasses) (
-            mkExternalBrowserHostModule { inherit profile externalEntry host user; }
-          )
-        ) externalBrowserClasses;
-      in browserIncludes ++ externalIncludes
-    ) profiles;
+    in lib.concatMap (source: map (class: mkBrowserProfileInclude { inherit source class host user; }) source.classes) profiles;
 
   firefoxProfileType = { user, host, ... }: den.lib.schema.mkInstanceType den.schema.firefox-profile {
     strict = false;
@@ -131,7 +77,7 @@
               Each class maps to homeManager.programs.<class>.profiles.<profileName>.
 
               Built-in (no extra inputs needed): firefox, floorp, librewolf
-              External (needs inputs.zen-browser): zen
+              External (needs inputs.zen-browser): zen-browser
             '';
             default = [ "firefox" ];
           };
@@ -169,24 +115,20 @@
       })
     ];
   };
-  firefoxs = { lib, user, ... }: {
+  firefox-options = { lib, user, ... }: {
     options.firefox-profiles = lib.mkOption {
       type = lib.types.attrsOf (firefoxProfileType { user = user; host = user.host; });
       default = {};
     };
   };
 in {
-  # create aspect for each profiles
-  den.aspects = lib.mkMerge deps;
+  den.aspects = lib.genAttrs allFirefoxProfiles (_: {});
+  den.classes = lib.genAttrs allBrowserClasses  (_: {});
 
-  den.classes.firefox.description = "Firefox profile configuration forwarded to homeManager.programs.firefox.profiles.<name>";
-  den.classes.floorp.description = "Floorp profile configuration forwarded to homeManager.programs.floorp.profiles.<name>";
-  den.classes.librewolf.description = "LibreWolf profile configuration forwarded to homeManager.programs.librewolf.profiles.<name>";
-  den.classes.zen.description = "Zen Browser profile configuration forwarded to homeManager.programs.zen-browser.profiles.<name>";
   den.schema = rec {
     firefox-profile.isEntity = true;
     firefox-profile.includes = [ den.default ];
-    user.imports = [ firefoxs ];
+    user.imports = [ firefox-options ];
     # Activate the user-to-firefox-profiles policy via den.schema.user.includes.
     user.includes = [
       { __isPolicy = true; name = "user-to-firefox-profiles"; fn = { user, host, ... }: toFirefoxProfiles user { inherit user host; }; }
