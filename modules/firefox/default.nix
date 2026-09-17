@@ -48,7 +48,7 @@
       homeManager =
         { pkgs, lib, config, osConfig, ... }: let
           profileAspectWithCtx = let
-            raw = profile.aspect;
+            raw = profile.resolved;
             inherit (den.lib.aspects.fx.handlers) constantHandler;
           in if builtins.isAttrs raw then
             raw // {
@@ -185,6 +185,7 @@ in {
   den.classes.zen.description = "Zen Browser profile configuration forwarded to homeManager.programs.zen-browser.profiles.<name>";
   den.schema = rec {
     firefox-profile.isEntity = true;
+    firefox-profile.includes = [ den.default ];
     user.imports = [ firefoxs ];
     # Activate the user-to-firefox-profiles policy via den.schema.user.includes.
     user.includes = [
