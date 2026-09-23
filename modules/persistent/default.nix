@@ -98,7 +98,6 @@ in {
       {
         imports = [
           inputs.${x}.nixosModules.${x}
-          { _module.args.p = persistence; }
         ];
         config = fix x (deepMergeList (map (normalize x) (lib.unique persistence)));
       };
