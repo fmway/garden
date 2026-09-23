@@ -6,6 +6,22 @@
   {
     options.persistent = {
       enable = lib.mkEnableOption "Enable impermanence/preservation support for this host";
+      diskType = lib.mkOption {
+        type = lib.types.enum [
+          # "btrfs" # TODO
+          "zfs"
+        ];
+        default = "zfs";
+      };
+      # FIXME: can we do automatically instead?
+      rollbackCommands = lib.mkOption {
+        type = lib.types.lines;
+        example = lib.literalExpression ''
+          '''
+            zfs rollback -r zroot/ROOT@blank
+          '''
+        '';
+      };
       implementation = lib.mkOption {
         type = lib.types.enum [ "impermanence" "preservation" ];
         default = "impermanence";
@@ -98,7 +114,6 @@ in {
       {
         imports = [
           inputs.${x}.nixosModules.${x}
-          { _module.args.p = persistence; }
         ];
         config = fix x (deepMergeList (map (normalize x) (lib.unique persistence)));
       };
