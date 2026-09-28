@@ -2,20 +2,7 @@
   inherit (den.lib) policy aspects resolveEntity;
   inherit (den.lib.aspects.fx.handlers) constantHandler;
   inherit (policy) pipe;
-
-  deepMergeList =
-    builtins.zipAttrsWith (_: v: let
-      f = builtins.head v;
-    in
-      if builtins.length v == 1 then
-        f
-      else if builtins.isAttrs f then
-        deepMergeList v
-      else if builtins.isList f then
-        builtins.concatLists v
-      else
-        lib.last v
-    );
+  inherit (import ../../utils.nix { inherit lib; }) deepMergeList;
 
   flatModule = module: {
     imports = builtins.concatMap (x: x.imports or []) (module.imports or []);

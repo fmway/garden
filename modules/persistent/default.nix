@@ -1,6 +1,7 @@
 { den, lib, inputs, ... }: let
   inherit (den.lib) policy;
   inherit (policy) pipe;
+  inherit (import ../../utils.nix { inherit lib; }) deepMergeList;
 
   persysOpt = { config, ... }:
   {
@@ -38,20 +39,6 @@
       };
     };
   };
-
-  deepMergeList =
-    builtins.zipAttrsWith (_: v: let
-      f = builtins.head v;
-    in
-      if builtins.length v == 1 then
-        f
-      else if builtins.isAttrs f then
-        deepMergeList v
-      else if builtins.isList f then
-        builtins.concatLists v
-      else
-        lib.last v
-    );
 
   _impermanenceOpts = { mode = null; method = null; directory = null; file = null; hideMount = null; allowTrash = null; persistentStoragePath = null; user = null; group = null; };
   _preservationOpts = { mode = null; how = null; directory = null; file = null; inInitrd = null; user = null; group = null; configureParent = null; parent = null; mountOptions = null; createLinkTarget = null; };
