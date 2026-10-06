@@ -1,10 +1,9 @@
 { lib, den, ... }: let
-  diskoModule = { config, ... }:
-  {
+  diskoModule = {
     options.mainDisk = lib.mkOption {
-      description = "mainDisk for disko (default: /dev/sda)";
-      type = lib.types.str;
-      default = lib.warn "${config.name}: mainDisk is undefined, use default value (dev/sda)" "/dev/sda";
+      description = "mainDisk for disko (default: null => /dev/sda)";
+      type = lib.types.nullOr lib.types.str;
+      default = null;
     };
   };
 in {
@@ -24,6 +23,11 @@ in {
         intoClass = "nixos";
         path = [ "disko" ];
         guard = { options, ... }: options ? disko;
-        adaptArgs = _: { mainDisk = host.mainDisk; };
+        adaptArgs = _: {
+          mainDisk =
+            if isNull (host.mainDisk or null) then
+              lib.warn "mainDisk is undefined, use default value (/dev/sda)" "/dev/sda"
+            else host.mainDisk;
+        };
       });
 }
